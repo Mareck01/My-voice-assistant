@@ -109,44 +109,60 @@
     }
 
     async function startListening() {
-      log("Requesting Mic...");
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        log("Mic Active.");
-        
-        state = 'listening';
-        orb.material.uniforms.color.value.set(0x0066ff);
-        document.getElementById('talkBtn').classList.add('listening');
+  log("Requesting Mic...");
+  try {
+    // 1. Force a specific sample rate for mobile stability
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      audio: { channelCount: 1, sampleRate: 16000 } 
+    });
+    log("Mic Active.");
+    
+    state = 'listening';
+    orb.material.uniforms.color.value.set(0x0066ff);
+    document.getElementById('talkBtn').classList.add('listening');
 
-        socket = new WebSocket('wss://api.deepgram.com/v1/listen?smart_format=true', ['token', CONFIG.deepgram]);
-        
-        socket.onopen = () => {
-          log("Deepgram Connected.");
-          mediaRecorder = new MediaRecorder(stream);
-          mediaRecorder.ondataavailable = (e) => {
-            if (socket.readyState === 1) socket.send(e.data);
-          };
-          mediaRecorder.start(250);
-        };
+    // 2. Added encoding and sample_rate parameters to the URL
+    const url = 'wss://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&encoding=linear16&sample_rate=16000';
+    socket = new WebSocket(url, ['token', CONFIG.deepgram]);
+    
+    socket.onopen = () => {
+      log("Deepgram Connected.");
+      // 3. Use a standard MimeType that Android 12 handles well
+      mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+      
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0 && socket.readyState === 1) {
+          socket.send(e.data);
+        }
+      };
+      mediaRecorder.start(250); // Send chunks every 250ms
+    };
 
-        socket.onmessage = (msg) => {
-          const data = JSON.parse(msg.data);
-          const text = data.results?.channels[0]?.alternatives[0]?.transcript;
-          if (text && data.is_final) {
-            log("Heard: " + text);
-            document.getElementById('transcript').innerText = "You: " + text;
-            stopListening();
-            processGroq(text);
-          }
-        };
-
-        socket.onerror = (e) => log("Deepgram WebSocket Error.");
-        socket.onclose = () => log("Deepgram Connection Closed.");
-
-      } catch (err) {
-        log("ERROR: " + err.message);
+    socket.onmessage = (msg) => {
+      const data = JSON.parse(msg.data);
+      const text = data.results?.channels[0]?.alternatives[0]?.transcript;
+      if (text && data.is_final) {
+        log("Heard: " + text);
+        document.getElementById('transcript').innerText = "You: " + text;
+        stopListening();
+        processGroq(text);
       }
-    }
+    };
+
+    socket.onerror = (e) => {
+      log("Socket Error: Check API Key or Data Connection.");
+    };
+    
+    socket.onclose = (e) => {
+      log(`Connection Closed (Code: ${e.code})`);
+      if (e.code === 1006) log("Hint: Mobile network may be blocking WebSockets.");
+    };
+
+  } catch (err) {
+    log("ERROR: " + err.message);
+  }
+            }
+        
 
     function stopListening() {
       state = 'thinking';

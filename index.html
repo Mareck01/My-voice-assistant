@@ -1,70 +1,86 @@
-<!DOCTYPE html>
+      <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>3D AI Assistant - Tecno Optimized</title>
+  <title>3D AI Assistant - Diagnostic Mode</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: system-ui, sans-serif; background: #000; color: #fff; overflow: hidden; touch-action: none; }
     #canvas-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
     
-    /* Responsive UI */
-    #controls { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; z-index: 10; }
-    button { padding: 18px 35px; font-size: 16px; border: 2px solid #0ff; background: rgba(0, 255, 255, 0.1); color: #0ff; border-radius: 50px; cursor: pointer; backdrop-filter: blur(10px); font-weight: bold; box-shadow: 0 0 15px rgba(0,255,255,0.2); }
-    button:active { transform: scale(0.9); }
-    button.listening { background: rgba(255, 0, 100, 0.3); border-color: #f06; color: #f06; animation: pulse 1.5s infinite; }
+    /* Diagnostic Log Overlay */
+    #debug-log {
+      position: fixed; top: 10px; left: 10px; width: 80%; max-height: 120px;
+      background: rgba(0, 0, 0, 0.8); color: #0f0; font-family: monospace;
+      font-size: 10px; z-index: 100; padding: 10px; border: 1px solid #0f0;
+      border-radius: 8px; overflow-y: auto; pointer-events: none;
+    }
+
+    #controls { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 10; }
+    button { 
+      padding: 18px 40px; font-size: 16px; border: 2px solid #0ff; 
+      background: rgba(0, 255, 255, 0.1); color: #0ff; border-radius: 50px; 
+      cursor: pointer; backdrop-filter: blur(10px); font-weight: bold;
+    }
+    button.listening { background: rgba(255, 0, 100, 0.3); border-color: #f06; color: #f06; }
     
-    #status { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); padding: 8px 20px; background: rgba(0, 0, 0, 0.6); border: 1px solid #333; border-radius: 20px; font-size: 12px; z-index: 10; letter-spacing: 1px; }
-    #transcript { position: fixed; bottom: 110px; left: 50%; transform: translateX(-50%); width: 85%; background: rgba(0,0,0,0.7); padding: 15px; border-radius: 15px; font-size: 14px; text-align: center; border: 1px solid rgba(0,255,255,0.1); }
-    @keyframes pulse { 0%, 100% { box-shadow: 0 0 5px #f06; } 50% { box-shadow: 0 0 20px #f06; } }
+    #transcript { 
+      position: fixed; bottom: 110px; left: 50%; transform: translateX(-50%); 
+      width: 85%; text-align: center; font-size: 14px; text-shadow: 0 0 5px #000;
+    }
   </style>
 </head>
 <body>
+  <div id="debug-log">SYSTEM: Ready. Tap TALK to start.</div>
   <div id="canvas-container"></div>
-  <div id="status">SYSTEM IDLE</div>
-  <div id="transcript">Tap "Talk" to begin</div>
+  <div id="transcript">AI is waiting...</div>
   <div id="controls"><button id="talkBtn">TALK</button></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
 
   <script>
+    // SECURE KEY MANAGEMENT
     const CONFIG = {
-  // We leave these empty so GitHub's scanners don't see anything!
-  deepgram: localStorage.getItem('dg_key') || '',
-  groq: localStorage.getItem('groq_key') || ''
-};
+      deepgram: localStorage.getItem('dg_key') || '',
+      groq: localStorage.getItem('groq_key') || ''
+    };
 
-// Add a "Settings" function to save keys on your phone
-if (!CONFIG.deepgram || !CONFIG.groq) {
-  const dg = prompt("Enter Deepgram Key:");
-  const gr = prompt("Enter Groq Key:");
-  localStorage.setItem('dg_key', dg);
-  localStorage.setItem('groq_key', gr);
-  location.reload(); // Refresh to apply keys
-};
+    function log(msg) {
+      const el = document.getElementById('debug-log');
+      el.innerHTML += `<br>> ${msg}`;
+      el.scrollTop = el.scrollHeight;
+      console.log(msg);
+    }
 
+    // Initialize Keys if missing
+    if (!CONFIG.deepgram || !CONFIG.groq) {
+      const dg = prompt("Enter Deepgram API Key:");
+      const gr = prompt("Enter Groq API Key:");
+      if(dg && gr) {
+        localStorage.setItem('dg_key', dg);
+        localStorage.setItem('groq_key', gr);
+        location.reload();
+      }
+    }
 
     let scene, camera, renderer, orb, eyes, state = 'idle';
-    let orientation = { beta: 0, gamma: 0 };
     let socket, mediaRecorder;
 
     function initThree() {
       scene = new THREE.Scene();
       camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
       camera.position.z = 4;
-
-      renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+      renderer = new THREE.WebGLRenderer({ antialias: false });
       renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // Optimized for Tecno
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
       document.getElementById('canvas-container').appendChild(renderer.domElement);
 
-      const geometry = new THREE.IcosahedronGeometry(1, 4); // Smoother orb
+      const geometry = new THREE.IcosahedronGeometry(1, 4);
       const material = new THREE.ShaderMaterial({
         uniforms: {
           time: { value: 0 },
-          state: { value: 0 },
           audioLevel: { value: 0 },
           color: { value: new THREE.Color(0x00ffff) }
         },
@@ -74,75 +90,62 @@ if (!CONFIG.deepgram || !CONFIG.groq) {
           varying vec3 vNormal;
           void main() {
             vNormal = normalize(normalMatrix * normal);
-            vec3 pos = position + normal * (sin(position.y * 5.0 + time) * 0.05 + audioLevel * 0.4);
+            vec3 pos = position + normal * (sin(position.y * 5.0 + time) * 0.05 + audioLevel * 0.5);
             gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
           }
         `,
         fragmentShader: `
-          uniform float state;
           uniform vec3 color;
           varying vec3 vNormal;
           void main() {
             float fresnel = pow(1.0 - dot(vNormal, vec3(0,0,1)), 3.0);
-            vec3 outColor = mix(color * 0.2, color, fresnel);
-            gl_FragColor = vec4(outColor, 1.0);
+            gl_FragColor = vec4(mix(color * 0.2, color, fresnel), 1.0);
           }
-        `,
-        transparent: true
+        `
       });
-
       orb = new THREE.Mesh(geometry, material);
       scene.add(orb);
-
-      // Pupils for "Awareness"
-      const eyeGeo = new THREE.SphereGeometry(0.12, 12, 12);
-      const eyeMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
-      const leftEye = new THREE.Mesh(eyeGeo, eyeMat); leftEye.position.set(-0.35, 0.25, 0.85);
-      const rightEye = new THREE.Mesh(eyeGeo, eyeMat); rightEye.position.set(0.35, 0.25, 0.85);
-      eyes = new THREE.Group(); eyes.add(leftEye, rightEye);
-      orb.add(eyes);
-    }
-
-    function animate() {
-      requestAnimationFrame(animate);
-      const t = Date.now() * 0.002;
-      orb.material.uniforms.time.value = t;
-
-      // Awareness Tracking: Pupils shift to counter tilt
-      eyes.position.x = THREE.MathUtils.lerp(eyes.position.x, orientation.gamma * 0.005, 0.1);
-      eyes.position.y = THREE.MathUtils.lerp(eyes.position.y, -orientation.beta * 0.005, 0.1);
-      orb.rotation.y = THREE.MathUtils.lerp(orb.rotation.y, orientation.gamma * 0.01, 0.05);
-
-      if (state === 'idle') {
-          orb.scale.setScalar(1 + Math.sin(t) * 0.03);
-          if (Math.random() < 0.008) gsap.to(eyes.scale, {y: 0, duration: 0.1, yoyo: true, repeat: 1});
-      }
-      renderer.render(scene, camera);
+      log("3D Scene Initialized.");
     }
 
     async function startListening() {
-      state = 'listening';
-      orb.material.uniforms.color.value.set(0x0066ff);
-      document.getElementById('talkBtn').classList.add('listening');
+      log("Requesting Mic...");
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        log("Mic Active.");
+        
+        state = 'listening';
+        orb.material.uniforms.color.value.set(0x0066ff);
+        document.getElementById('talkBtn').classList.add('listening');
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      socket = new WebSocket('wss://api.deepgram.com/v1/listen?smart_format=true', ['token', CONFIG.deepgram]);
-      
-      socket.onopen = () => {
-        mediaRecorder = new MediaRecorder(stream);
-        mediaRecorder.ondataavailable = (e) => socket.readyState === 1 && socket.send(e.data);
-        mediaRecorder.start(250);
-      };
+        socket = new WebSocket('wss://api.deepgram.com/v1/listen?smart_format=true', ['token', CONFIG.deepgram]);
+        
+        socket.onopen = () => {
+          log("Deepgram Connected.");
+          mediaRecorder = new MediaRecorder(stream);
+          mediaRecorder.ondataavailable = (e) => {
+            if (socket.readyState === 1) socket.send(e.data);
+          };
+          mediaRecorder.start(250);
+        };
 
-      socket.onmessage = async (msg) => {
-        const data = JSON.parse(msg.data);
-        const text = data.results?.channels[0]?.alternatives[0]?.transcript;
-        if (text && data.is_final) {
-          stopListening();
-          document.getElementById('transcript').innerText = "You: " + text;
-          processGroq(text);
-        }
-      };
+        socket.onmessage = (msg) => {
+          const data = JSON.parse(msg.data);
+          const text = data.results?.channels[0]?.alternatives[0]?.transcript;
+          if (text && data.is_final) {
+            log("Heard: " + text);
+            document.getElementById('transcript').innerText = "You: " + text;
+            stopListening();
+            processGroq(text);
+          }
+        };
+
+        socket.onerror = (e) => log("Deepgram WebSocket Error.");
+        socket.onclose = () => log("Deepgram Connection Closed.");
+
+      } catch (err) {
+        log("ERROR: " + err.message);
+      }
     }
 
     function stopListening() {
@@ -154,13 +157,23 @@ if (!CONFIG.deepgram || !CONFIG.groq) {
     }
 
     async function processGroq(text) {
-      const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {'Authorization': `Bearer ${CONFIG.groq}`, 'Content-Type': 'application/json'},
-        body: JSON.stringify({model: 'llama-3-8b-8192', messages: [{role: 'user', content: text}]})
-      });
-      const data = await resp.json();
-      speak(data.choices[0].message.content);
+      log("Fetching Groq response...");
+      try {
+        const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {'Authorization': `Bearer ${CONFIG.groq}`, 'Content-Type': 'application/json'},
+          body: JSON.stringify({model: 'llama-3-8b-8192', messages: [{role: 'user', content: text}]})
+        });
+        const data = await resp.json();
+        if(data.choices) {
+          log("Groq Success.");
+          speak(data.choices[0].message.content);
+        } else {
+          log("Groq API Key/Limit Error.");
+        }
+      } catch (e) {
+        log("Groq Connection Failed.");
+      }
     }
 
     function speak(text) {
@@ -175,17 +188,33 @@ if (!CONFIG.deepgram || !CONFIG.groq) {
             clearInterval(sync);
             orb.material.uniforms.audioLevel.value = 0;
             state = 'idle';
+            orb.material.uniforms.color.value.set(0x00ffff);
             return;
           }
-          orb.material.uniforms.audioLevel.value = Math.random() * 0.5;
-        }, 60);
+          orb.material.uniforms.audioLevel.value = 0.1 + Math.random() * 0.4;
+        }, 50);
       };
       window.speechSynthesis.speak(utterance);
     }
 
-    window.addEventListener('deviceorientation', e => { orientation.beta = e.beta; orientation.gamma = e.gamma; });
-    document.getElementById('talkBtn').onclick = () => { if(state === 'idle') startListening(); };
-    initThree(); animate();
+    function animate() {
+      requestAnimationFrame(animate);
+      orb.material.uniforms.time.value = Date.now() * 0.002;
+      renderer.render(scene, camera);
+    }
+
+    document.getElementById('talkBtn').onclick = () => {
+      if(state === 'idle') startListening();
+    };
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    initThree();
+    animate();
   </script>
 </body>
 </html>
